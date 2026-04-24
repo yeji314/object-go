@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { DonutChart } from "@/components/DonutChart";
 import { StatusBadge } from "@/components/StatusBadge";
-import { formatDateKr, formatKrw, daysBetween, deadlineTone } from "@/lib/utils";
+import { formatDateKr, formatKrw, daysBetween, deadlineTone, weekdayKr, cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +51,13 @@ export default async function HomeDashboard({ params }: { params: { id: string }
     return d >= startOfWeek && d <= endOfWeek;
   });
 
+  // timeline: 이번 주에 일정이 없으면 다가오는 최대 10개로 폴백
+  const upcoming = schedules
+    .filter((s) => new Date(s.work_date).getTime() >= startOfWeek.getTime())
+    .slice(0, 10);
+  const timelineItems = thisWeek.length > 0 ? thisWeek : upcoming;
+  const timelineLabel = thisWeek.length > 0 ? "이번 주 공사" : "다가오는 공사";
+
   const daysFromStart = project?.start_date ? daysBetween(project.start_date, today) : null;
   const daysToEnd = project?.end_date ? daysBetween(today, project.end_date) : null;
 
@@ -63,41 +69,21 @@ export default async function HomeDashboard({ params }: { params: { id: string }
 
   return (
     <div className="space-y-4">
-      {/* 요약 카드 */}
-      <div className="card p-5">
-        <div className="flex gap-4">
-          <div className="flex-1 flex flex-col items-center">
-            <DonutChart
-              value={budgetRatio}
-              color="#1d4ed8"
-              centerLabel={
-                <div className="flex flex-col items-center">
-                  <span className="text-xs text-slate-500">예산 집행</span>
-                  <span className="text-lg font-semibold">{Math.round(budgetRatio * 100)}%</span>
-                </div>
-              }
-            />
-            <p className="mt-2 text-xs text-slate-500 text-center">
-              {formatKrw(spent)} / {formatKrw(budget)}
-            </p>
-          </div>
-          <div className="flex-1 flex flex-col items-center">
-            <DonutChart
-              value={progressRatio}
-              color="#10b981"
-              centerLabel={
-                <div className="flex flex-col items-center">
-                  <span className="text-xs text-slate-500">일정 진행</span>
-                  <span className="text-lg font-semibold">{Math.round(progressRatio * 100)}%</span>
-                </div>
-              }
-            />
-            <p className="mt-2 text-xs text-slate-500 text-center">
-              {doneCount} / {schedules.length} 공정
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
+      {/* 요약 카드 - 막대 진척률 */}
+      <div className="card p-5 space-y-4">
+        <ProgressBar
+          label="예산 집행"
+          ratio={budgetRatio}
+          subtext={`${formatKrw(spent)} / ${formatKrw(budget)}`}
+          barClass="bg-blue-600"
+        />
+        <ProgressBar
+          label="일정 진행"
+          ratio={progressRatio}
+          subtext={`${doneCount} / ${schedules.length} 공정 완료`}
+          barClass="bg-emerald-500"
+        />
+        <div className="grid grid-cols-2 gap-2 text-sm pt-2">
           <div className="rounded-xl bg-slate-50 p-3">
             <p className="text-slate-500 text-xs">착공</p>
             <p className="font-medium">
@@ -134,30 +120,50 @@ export default async function HomeDashboard({ params }: { params: { id: string }
         </Link>
       )}
 
-      {/* 이번 주 공사 */}
-      <section>
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="section-title">이번 주 공사</h2>
+      {/* 공사 일정 - 타임라인 스타일 */}
+      <div className="flex-1 bg-white rounded-lg shadow-xl mt-4 p-6">
+        <div className="flex items-center justify-between">
+          <h4 className="text-xl text-gray-900 font-bold">{timelineLabel}</h4>
           <Link href={`/project/${projectId}/schedule`} className="text-xs text-blue-700">
             전체 →
           </Link>
         </div>
-        <div className="space-y-2">
-          {thisWeek.length === 0 && <p className="text-sm text-slate-400">이번 주에 예정된 공사가 없습니다.</p>}
-          {thisWeek.map((s) => (
-            <div key={s.id} className="card p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-slate-500">{formatDateKr(s.work_date)}</p>
-                  <p className="font-medium">{s.process_name}</p>
+
+        {timelineItems.length === 0 ? (
+          <p className="text-sm text-slate-400 mt-4">예정된 공사가 없습니다.</p>
+        ) : (
+          <div className="relative px-4 mt-4">
+            <div className="absolute h-full border border-dashed border-slate-400/40" />
+            {timelineItems.map((s) => {
+              const dotColor =
+                s.status === "done"
+                  ? "bg-emerald-500"
+                  : s.status === "in_progress"
+                  ? "bg-blue-600"
+                  : "bg-slate-300";
+              return (
+                <div key={s.id} className="flex items-center w-full my-6 -ml-1.5">
+                  <div className="w-1/12 z-10">
+                    <div className={cn("w-3.5 h-3.5 rounded-full", dotColor)} />
+                  </div>
+                  <div className="w-11/12 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-medium text-gray-900 truncate">{s.process_name}</p>
+                      <StatusBadge status={s.status} />
+                    </div>
+                    {s.detail_items && (
+                      <p className="text-xs text-gray-500 mt-0.5 truncate">{s.detail_items}</p>
+                    )}
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {formatDateKr(s.work_date)} ({s.day_of_week ?? weekdayKr(s.work_date)})
+                    </p>
+                  </div>
                 </div>
-                <StatusBadge status={s.status} />
-              </div>
-              {s.detail_items && <p className="text-xs text-slate-500 mt-1">{s.detail_items}</p>}
-            </div>
-          ))}
-        </div>
-      </section>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* 결정 필요 항목 요약 */}
       {decisions.length > 0 && (
@@ -171,7 +177,8 @@ export default async function HomeDashboard({ params }: { params: { id: string }
           <ul className="space-y-2">
             {decisions.slice(0, 4).map((d) => {
               const tone = deadlineTone(d.deadline);
-              const toneCls = tone === "danger" ? "text-rose-700" : tone === "warning" ? "text-amber-700" : "text-slate-500";
+              const toneCls =
+                tone === "danger" ? "text-rose-700" : tone === "warning" ? "text-amber-700" : "text-slate-500";
               const days = d.deadline ? daysBetween(today, d.deadline) : null;
               return (
                 <li key={d.id} className="card p-3 flex items-center justify-between">
@@ -179,7 +186,9 @@ export default async function HomeDashboard({ params }: { params: { id: string }
                     <p className="text-xs text-slate-500">{d.category}</p>
                     <p className="font-medium truncate">{d.title}</p>
                   </div>
-                  <span className={`text-xs ${toneCls}`}>{days != null ? (days < 0 ? `D+${-days}` : `D-${days}`) : "기한 없음"}</span>
+                  <span className={`text-xs ${toneCls}`}>
+                    {days != null ? (days < 0 ? `D+${-days}` : `D-${days}`) : "기한 없음"}
+                  </span>
                 </li>
               );
             })}
@@ -201,6 +210,32 @@ export default async function HomeDashboard({ params }: { params: { id: string }
           </ul>
         </section>
       )}
+    </div>
+  );
+}
+
+function ProgressBar({
+  label,
+  ratio,
+  subtext,
+  barClass,
+}: {
+  label: string;
+  ratio: number;
+  subtext?: string;
+  barClass: string;
+}) {
+  const pct = Math.round(Math.max(0, Math.min(1, Number.isFinite(ratio) ? ratio : 0)) * 100);
+  return (
+    <div>
+      <div className="flex items-baseline justify-between">
+        <span className="text-sm font-medium text-slate-700">{label}</span>
+        <span className="text-sm font-semibold text-slate-900">{pct}%</span>
+      </div>
+      <div className="mt-1.5 h-2.5 rounded-full bg-slate-100 overflow-hidden">
+        <div className={cn("h-full rounded-full transition-[width] duration-500", barClass)} style={{ width: `${pct}%` }} />
+      </div>
+      {subtext && <p className="mt-1 text-xs text-slate-500">{subtext}</p>}
     </div>
   );
 }
