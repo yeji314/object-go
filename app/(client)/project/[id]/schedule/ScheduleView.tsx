@@ -6,6 +6,8 @@ import type { Schedule, ScheduleStatus, Attachment, Profile } from "@/lib/types/
 import { StatusBadge } from "@/components/StatusBadge";
 import { CommentThread } from "@/components/CommentThread";
 import { FileUpload } from "@/components/FileUpload";
+import { PendingPhotoPicker } from "@/components/PendingPhotoPicker";
+import { uploadPendingPhotos } from "@/lib/attachments";
 import { formatDateKr, formatKrw, weekdayKr, cn } from "@/lib/utils";
 import { ChevronDown, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -75,6 +77,7 @@ export function ScheduleView({ projectId }: { projectId: string }) {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditForm>(emptyForm());
+  const [pendingPhotos, setPendingPhotos] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -117,6 +120,7 @@ export function ScheduleView({ projectId }: { projectId: string }) {
 
   function startNew() {
     setEditForm(emptyForm());
+    setPendingPhotos([]);
     setEditingId(DRAFT_ID);
     setFormError(null);
     if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
@@ -124,6 +128,7 @@ export function ScheduleView({ projectId }: { projectId: string }) {
 
   function startEdit(s: Schedule) {
     setEditForm(toForm(s));
+    setPendingPhotos([]);
     setEditingId(s.id);
     setOpenId(s.id);
     setFormError(null);
@@ -131,6 +136,7 @@ export function ScheduleView({ projectId }: { projectId: string }) {
 
   function cancelEdit() {
     setEditingId(null);
+    setPendingPhotos([]);
     setFormError(null);
   }
 
@@ -143,6 +149,7 @@ export function ScheduleView({ projectId }: { projectId: string }) {
     setFormError(null);
     const payload = fromForm(editForm);
     try {
+      let savedId: string | null = null;
       if (editingId === DRAFT_ID) {
         const { data, error } = await supabase
           .from("schedules")
@@ -152,6 +159,7 @@ export function ScheduleView({ projectId }: { projectId: string }) {
         if (error) throw error;
         if (data) {
           const inserted = data as unknown as Schedule;
+          savedId = inserted.id;
           setSchedules((xs) => [...xs, inserted].sort((a, b) => a.work_date.localeCompare(b.work_date)));
           setOpenId(inserted.id);
         }
@@ -165,12 +173,26 @@ export function ScheduleView({ projectId }: { projectId: string }) {
         if (error) throw error;
         if (data) {
           const updated = data as unknown as Schedule;
+          savedId = updated.id;
           setSchedules((xs) =>
             xs.map((x) => (x.id === editingId ? updated : x)).sort((a, b) => a.work_date.localeCompare(b.work_date))
           );
         }
       }
+
+      if (savedId && pendingPhotos.length > 0) {
+        const uploaded = await uploadPendingPhotos(supabase, {
+          projectId,
+          refType: "schedule",
+          refId: savedId,
+          userId: me?.id ?? null,
+          files: pendingPhotos,
+        });
+        if (uploaded.length) setAttachments((prev) => [...prev, ...uploaded]);
+      }
+
       setEditingId(null);
+      setPendingPhotos([]);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setFormError(msg || "저장에 실패했습니다.");
@@ -235,6 +257,10 @@ export function ScheduleView({ projectId }: { projectId: string }) {
         <div className="card p-4 border-2 border-blue-300">
           <p className="section-title mb-3">새 일정 추가</p>
           <EditFormFields form={editForm} onChange={setEditForm} />
+          <div className="mt-4">
+            <p className="section-title mb-2">현장 사진 (저장 시 업로드)</p>
+            <PendingPhotoPicker files={pendingPhotos} onChange={setPendingPhotos} />
+          </div>
           {formError && <p className="text-sm text-rose-600 mt-2">{formError}</p>}
           <div className="flex gap-2 mt-3">
             <button onClick={cancelEdit} className="btn-outline flex-1">취소</button>
@@ -261,6 +287,11 @@ export function ScheduleView({ projectId }: { projectId: string }) {
                 <div>
                   <p className="section-title mb-3">일정 편집</p>
                   <EditFormFields form={editForm} onChange={setEditForm} />
+                  <div className="mt-4">
+                    <p className="section-title mb-2">추가할 사진 (저장 시 업로드)</p>
+                    <PendingPhotoPicker files={pendingPhotos} onChange={setPendingPhotos} />
+                    <p className="mt-2 text-[11px] text-slate-400">기존에 올린 사진은 편집 취소 후 상세 화면에서 관리할 수 있습니다.</p>
+                  </div>
                   {formError && <p className="text-sm text-rose-600 mt-2">{formError}</p>}
                   <div className="flex gap-2 mt-3">
                     <button onClick={cancelEdit} className="btn-outline flex-1">취소</button>
@@ -376,7 +407,7 @@ function EditFormFields({ form, onChange }: { form: EditForm; onChange: (f: Edit
   const weekday = form.work_date ? weekdayKr(form.work_date) : "";
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label={`공사 날짜${weekday ? ` (${weekday})` : ""} *`}>
           <input
             type="date"
@@ -425,7 +456,7 @@ function EditFormFields({ form, onChange }: { form: EditForm; onChange: (f: Edit
         />
       </Field>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Field label="예상 비용 (원)">
           <input
             type="number"
